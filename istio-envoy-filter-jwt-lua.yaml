@@ -419,3 +419,38 @@ spec:
                 request_handle:headers():add("x-custom-header", "custom-value")
               end
 
+-----
+
+apiVersion: "security.istio.io/v1beta1"
+kind: "RequestAuthentication"
+metadata:
+  name: "jwt-example"
+  namespace: "istio-system"
+spec:
+  selector:
+    matchLabels:
+      istio: ingressgateway
+  jwtRules:
+  - issuer: "https://example-issuer.com"
+    jwksUri: "https://example-issuer.com/.well-known/jwks.json"
+------
+apiVersion: networking.istio.io/v1alpha3
+kind: VirtualService
+metadata:
+  name: my-service
+  namespace: default
+spec:
+  hosts:
+  - "my-service.default.svc.cluster.local"
+  http:
+  - match:
+    - uri:
+        prefix: "/"
+    route:
+    - destination:
+        host: my-service
+      headers:
+        request:
+          add:
+            x-forwarded-jwt-claim: "{{ .Request.Auth.Jwt.Payload }}"
+
