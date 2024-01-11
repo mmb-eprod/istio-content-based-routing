@@ -205,3 +205,135 @@ spec:
                 add_table_as_headers(content["claims"],jwtHeaderName,headers)
             end
           end
+
+
+
+
+apiVersion: networking.istio.io/v1alpha3
+kind: EnvoyFilter
+metadata:
+  name: jwt-lua-filter
+spec:
+  workloadSelector:
+    labels:
+      app: your-app-label  # Replace with your app label
+  configPatches:
+    - applyTo: HTTP_FILTER
+      match:
+        context: GATEWAY
+        listener:
+          portNumber: 80  # Replace with the relevant port number if different
+          filterChain:
+            filter:
+              name: "envoy.http_connection_manager"
+              subFilter:
+                name: "envoy.router"
+      patch:
+        operation: INSERT_BEFORE
+        value:
+          name: envoy.lua
+          typed_config:
+            "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua
+            inlineCode: |
+              -- Json Parsing based on https://gist.github.com/tylerneylon/59f4bcf316be525b30ab
+              -- Base64 decoding based on wikipedia description of 8/6bit encoding.
+
+              -- base64 char array.. note final 2 chars are for RFC4648-URL encoding
+              -- as per JWT spec section 2 terminology 'Base64url Encoding'
+              local alpha='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_'
+
+              -- convert to 6 char long binary string. (max int 64!)
+              function toBinaryString(int)
+                  if int > 64 then
+                      error("Bad number "..int.." to convert to binary")
+                  end        
+                  local remaining = tonumber(int)
+                  local bits = ''
+                  for i = 5, 0, -1 do
+                      local pow = 2 ^ i
+                      if remaining >= pow then
+                          bits = bits .. '1'
+                          remaining = remaining - pow
+                      else
+                          bits = bits .. '0'
+                      end
+                  end
+                  return bits
+              end
+
+              function fromBinaryString(bits)
+                  return tonumber(bits, 2)
+              end
+
+              function decodeBase64(encoded)
+                  local bitstr = ''
+                  local decoded = ''
+                  -- decode chars into bitstring
+                  for i = 1, string.len(encoded) do
+                      local offset, _ = string.find(alpha, string.sub(encoded, i, i))
+                      if offset == nil then
+                          error("Bad base64 character " .. string.sub(encoded, i, i))
+                      end
+                      bitstr = bitstr .. toBinaryString(offset-1)
+                  end
+                  -- decode bitstring back to chars
+                  for i = 1, string.len(bitstr), 8 do
+                      decoded = decoded .. string.char(fromBinaryString(string.sub(bitstr, i, i+7)))
+                  end
+                  return decoded
+              end
+
+              -- json handling 
+
+              local json = {}
+
+              -- ... (JSON parsing functions continue here)
+
+              function decode_jwt(jwt)
+                i=0
+                result = {}
+                for match in (jwt..'.'):gmatch("(.-)%.") do
+                    result[i]=decodeBase64(match)
+                    i=i+1
+                end
+                -- header
+                head = json.parse(result[0])
+                -- claims
+                claims = json.parse(result[1])
+                return {head=head,claims=claims}
+              end
+
+              function add_header(k,v,prefix,headers)
+                if "number" == type (k) then
+                  headers:add(prefix,v)
+                else 
+                  headers:add(prefix.."-"..k,v)
+                end
+              end
+
+              function add_table_as_headers(table, prefix, headers)
+                for k,v in pairs(table) do
+                  if "string" == type( v ) then
+                    add_header(k,v,prefix,headers)
+                  elseif "table" == type( v ) then
+                    add_table_as_headers(v,prefix.."-"..k,headers)
+                  end
+                end
+              end
+
+              function envoy_on_request(request_handle)
+                local jwtHeaderName = "JWTHeaderName"
+                headers = request_handle:headers()
+                jwt = headers:get(jwtHeaderName)
+                if jwt == nil then
+                    headers:add("jwt","headernotfound")
+                else
+                    content = decode_jwt(jwt)
+                    add_table_as_headers(content["claims"],jwtHeaderName,headers)
+                end
+              end
+          
+
+
+
+          
