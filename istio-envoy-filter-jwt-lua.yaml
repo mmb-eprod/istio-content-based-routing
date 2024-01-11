@@ -365,4 +365,18 @@ spec:
                 request_handle:headers():add("new-header", "header-value")
               end
 
-          
+----
+
+apiVersion: telemetry.istio.io/v1alpha1
+kind: Telemetry
+metadata:
+  name: access-logs
+  namespace: istio-system
+spec:
+  accessLogging:
+    - providers:
+        - name: stdout
+      selector:
+        matchLabels:
+          service.istio.io/canonical-name: <your-service-name>
+
