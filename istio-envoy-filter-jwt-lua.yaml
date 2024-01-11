@@ -379,4 +379,43 @@ spec:
       selector:
         matchLabels:
           service.istio.io/canonical-name: <your-service-name>
+-----
+
+apiVersion: networking.istio.io/v1alpha3
+kind: EnvoyFilter
+metadata:
+  name: modify-headers-for-test1
+  namespace: test1
+spec:
+  workloadSelector:
+    labels:
+      app: hello-test1  # Adjust this label to match your service
+  configPatches:
+    - applyTo: HTTP_FILTER
+      match:
+        context: SIDECAR_OUTBOUND  # Modify outbound traffic
+        listener:
+          filterChain:
+            filter:
+              name: "envoy.filters.network.http_connection_manager"
+        routeConfiguration:
+          vhost:
+            name: "hello-test1"  # Name of the virtual host
+            route:
+              action: ANY
+              match:
+                headers:
+                  name: "jwtheadername-name"
+                  exactMatch: "John Doe"
+      patch:
+        operation: INSERT_FIRST  # Add this filter at the beginning
+        value:
+          name: envoy.lua
+          typed_config:
+            "@type": "type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua"
+            inlineCode: |
+              function envoy_on_request(request_handle)
+                -- Add or modify headers here
+                request_handle:headers():add("x-custom-header", "custom-value")
+              end
 
